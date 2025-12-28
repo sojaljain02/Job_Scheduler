@@ -2,36 +2,6 @@
 
 A distributed, scalable job scheduler with CRON support (second-level precision), built with FastAPI, PostgreSQL, and Python.
 
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         FastAPI App                          │
-│  ┌─────────────┐  ┌─────────────┐  ┌──────────────────┐   │
-│  │  Jobs API   │  │Executions   │  │  Health Check    │   │
-│  │  Endpoints  │  │    API      │  │                  │   │
-│  └─────────────┘  └─────────────┘  └──────────────────┘   │
-└───────────────────────────┬─────────────────────────────────┘
-                            │
-        ┌───────────────────┴──────────────────┐
-        │                                       │
-┌───────▼────────┐                   ┌─────────▼────────┐
-│   Scheduler    │                   │   Worker Pool    │
-│  (Priority Q)  │──────────────────▶│  (Thread Pool)   │
-│                │   Submit Jobs     │                  │
-└───────┬────────┘                   └─────────┬────────┘
-        │                                      │
-        │ Load Jobs                            │ Execute & Record
-        │                                      │
-┌───────▼──────────────────────────────────────▼────────┐
-│              PostgreSQL Database                      │
-│  ┌──────────┐              ┌──────────────────┐     │
-│  │   Jobs   │              │  Job Executions  │     │
-│  │  Table   │              │      Table       │     │
-│  └──────────┘              └──────────────────┘     │
-└───────────────────────────────────────────────────────┘
-```
-
 ## 🚀 Quick Start
 
 ### Using Docker (Recommended)
@@ -155,6 +125,59 @@ job-scheduler/
 ├── Dockerfile
 └── README.md
 ```
+
+## 🏗️ System Design
+
+**Overview:** The system is composed of a small set of cooperating components that provide scheduling, execution, and observability for HTTP-based jobs.
+
+- **API (FastAPI)** — Job CRUD, executions queries, debug endpoints.
+- **Scheduler** — Priority queue (min-heap) that computes next run times using croniter and submits work to the WorkerPool.
+- **WorkerPool** — ThreadPoolExecutor executing HTTP requests (configurable `MAX_WORKERS`).
+- **Database (Postgres)** — Stores `jobs` and `job_executions` for audit and stats.
+- **Monitoring / Observability** — Prometheus metrics, Postgres exporter, and Grafana dashboards for RPS, latency, success rate and queue depth.
+
+**Architectural flow (text):**
+
+API → JobService → Postgres  
+Scheduler (refreshes from Postgres or notified by JobService) → Priority Queue → WorkerPool → HTTP Target → Execution recorded in Postgres
+
+---
+
+## 🔁 Data Flow
+
+1. **Create job:** Client POSTs to `/api/v1/jobs`; `JobService` validates and inserts a `jobs` row (`job_id`, `schedule`, `api_url`, `active`, ...).
+2. **Discover & materialize:** Scheduler refreshes active jobs (startup / interval / notification) and materializes required fields in-memory.
+3. **Compute next run:** Scheduler uses `croniter` to compute the next execution time and pushes an entry onto the priority queue.
+4. **Dispatch:** When due, scheduler pops the job and submits it to the `WorkerPool`. A `job_executions` row is created with `PENDING` and `started_at` on dispatch.
+5. **Execute & record:** Worker performs the HTTP request, captures HTTP status, latency and response (truncated) and updates the execution row with `SUCCESS`/`FAILED`, `attempts`, `finished_at`.
+6. **Retries:** On failure, worker retries using exponential backoff (controlled by `MAX_RETRIES` and `REQUEST_TIMEOUT`).
+
+**Schema highlights:**
+- `jobs` (job_id, schedule, api_url, execution_type, active, created_at)
+- `job_executions` (execution_id, job_id, status, http_status, attempt, started_at, finished_at, response)
+
+---
+
+## 🧭 API Design
+
+**Principles:** RESTful, predictable responses, asynchronous execution semantics, use of `202 Accepted` for queued ops, and clear error codes for validation and server errors.
+
+**Key endpoints:**
+- `POST /api/v1/jobs` — Create a job. Returns `201 Created` with job JSON.
+- `GET /api/v1/jobs` — List jobs (pagination supported).
+- `GET /api/v1/jobs/{job_id}` — Retrieve a single job (`200` or `404`).
+- `PUT /api/v1/jobs/{job_id}` — Update job (`200`, `400`, or `404`).
+- `DELETE /api/v1/jobs/{job_id}` — Delete job (`204` or `404`).
+- `POST /api/v1/debug/execute` — Trigger immediate one-off execution (`202 Accepted` with execution id).
+- `POST /api/v1/debug/refresh_schedule` — Force scheduler to reload active jobs (`200 OK`).
+- `GET /api/v1/executions/{job_id}` — List executions for a job (`200 OK`).
+- `GET /api/v1/executions/{job_id}/latest` — Latest execution for job (`200` or `404`).
+
+**Errors & retry semantics:**
+- Validation errors: `400` with JSON details.
+- Execution semantics are **AT_LEAST_ONCE** for retryable jobs; for high-throughput tests set `MAX_RETRIES=0` to avoid amplifying load.
+
+---
 
 ## 🔧 Configuration
 
