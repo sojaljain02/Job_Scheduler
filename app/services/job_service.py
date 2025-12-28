@@ -32,6 +32,13 @@ class JobService:
         db.refresh(job)
         
         logger.info(f"Created job {job.job_id}")
+        # Notify scheduler (if available) to pick up new job immediately
+        try:
+            from app import main as app_main
+            if hasattr(app_main, 'scheduler') and app_main.scheduler:
+                app_main.scheduler.refresh_schedule()
+        except Exception:
+            logger.debug("Scheduler not available to notify refresh")
         return job
     
     @staticmethod
@@ -78,6 +85,13 @@ class JobService:
         db.refresh(job)
         
         logger.info(f"Updated job {job.job_id}")
+        # Notify scheduler (if available) to refresh schedule
+        try:
+            from app import main as app_main
+            if hasattr(app_main, 'scheduler') and app_main.scheduler:
+                app_main.scheduler.refresh_schedule()
+        except Exception:
+            logger.debug("Scheduler not available to notify refresh")
         return job
     
     @staticmethod
@@ -92,4 +106,11 @@ class JobService:
         db.commit()
         
         logger.info(f"Deleted job {job.job_id}")
+        # Notify scheduler (if available) to refresh schedule
+        try:
+            from app import main as app_main
+            if hasattr(app_main, 'scheduler') and app_main.scheduler:
+                app_main.scheduler.refresh_schedule()
+        except Exception:
+            logger.debug("Scheduler not available to notify refresh")
         return True

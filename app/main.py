@@ -55,6 +55,13 @@ app = FastAPI(
 # Include routers
 app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["Jobs"])
 app.include_router(executions_router, prefix="/api/v1/executions", tags=["Executions"])
+# Debug endpoints (useful for testing in non-production environments)
+try:
+    from app.api.debug import router as debug_router
+    app.include_router(debug_router, prefix="/api/v1/debug", tags=["Debug"])
+except Exception:
+    # Don't fail startup if debug router is missing
+    pass
 
 @app.get("/health")
 def health():

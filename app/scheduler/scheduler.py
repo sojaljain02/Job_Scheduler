@@ -51,10 +51,18 @@ class Scheduler:
         self.lock = threading.Lock()
         logger.info("Scheduler initialized")
     
-    def load_active_jobs(self) -> List[Job]:
-        """Load all active jobs from database"""
+    def load_active_jobs(self) -> List[dict]:
+        """Load all active jobs from database and return materialized dicts
+        This avoids DetachedInstanceError by extracting needed attributes while the
+        session is still open.
+        """
         with get_db() as db:
-            jobs = db.query(Job).filter(Job.active == True).all()
+            rows = db.query(Job.job_id, Job.schedule, Job.api_url).filter(Job.active == True).all()
+            jobs = [{
+                "job_id": str(r.job_id),
+                "schedule": r.schedule,
+                "api_url": r.api_url
+            } for r in rows]
             logger.info(f"Loaded {len(jobs)} active jobs from database")
             return jobs
     
@@ -69,18 +77,18 @@ class Scheduler:
             now = datetime.now()
             for job in jobs:
                 try:
-                    # Calculate next run time for each job
-                    next_run = CronUtils.get_next_run_time(job.schedule, now)
+                    # Calculate next run time for each job (job is a dict now)
+                    next_run = CronUtils.get_next_run_time(job["schedule"], now)
                     scheduled_job = ScheduledJob(
-                        job_id=str(job.job_id),
+                        job_id=job["job_id"],
                         next_run=next_run,
-                        schedule=job.schedule,
-                        api_url=job.api_url
+                        schedule=job["schedule"],
+                        api_url=job["api_url"]
                     )
                     heapq.heappush(self.priority_queue, scheduled_job)
-                    logger.debug(f"Scheduled job {job.job_id} for {next_run}")
+                    logger.debug(f"Scheduled job {job['job_id']} for {next_run}")
                 except Exception as e:
-                    logger.error(f"Error scheduling job {job.job_id}: {str(e)}")
+                    logger.error(f"Error scheduling job {job.get('job_id')}: {str(e)}")
             
             logger.info(f"Schedule refreshed with {len(self.priority_queue)} jobs")
     
@@ -89,6 +97,11 @@ class Scheduler:
         self.is_running = True
         logger.info("Scheduler started")
         
+        # Initial load of schedule so jobs are picked up immediately on startup
+        try:
+            self.refresh_schedule()
+        except Exception as e:
+            logger.warning(f"Initial schedule load failed: {e}")
         last_refresh = time.time()
         
         while self.is_running:
