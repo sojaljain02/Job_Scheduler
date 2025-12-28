@@ -5,9 +5,15 @@ Notes:
 - Use host.docker.internal or receiver (docker service name) depending on where you run the script.
 """
 import asyncio
-import aiohttp
 import time
 import argparse
+import sys
+
+try:
+    import aiohttp
+except ImportError:
+    print("Missing dependency 'aiohttp'. Install it with: pip install aiohttp")
+    sys.exit(1)
 
 async def send(session, url, receiver, sem):
     payload = {"api_url": receiver}
