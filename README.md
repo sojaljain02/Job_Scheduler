@@ -2,6 +2,12 @@
 
 A distributed, scalable job scheduler with CRON support (second-level precision), built with FastAPI, PostgreSQL, and Python.
 
+
+## 🎥 Demo Video
+
+👉 [Watch the demo video](https://drive.google.com/file/d/12Gx8k1V6JhVJoPxb0VIqR15lZhIc5yb0/view?usp=drive_link)
+
+
 ## 🚀 Quick Start
 
 ### Using Docker (Recommended)
